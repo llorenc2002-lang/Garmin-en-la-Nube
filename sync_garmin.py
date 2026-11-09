@@ -29,6 +29,24 @@ def _garmin_call(stage: str, call: Any) -> Any:
         raise SyncFailure(stage, type(exc).__name__, getattr(exc, "status_code", None)) from None
 
 
+def _fetch_sleep(client: Any, start_day: date, end_day: date) -> list[Any]:
+    """Fetch sleep summaries in weekly windows accepted by Garmin."""
+    result: list[Any] = []
+    cursor = start_day
+    while cursor <= end_day:
+        window_end = min(cursor + timedelta(days=6), end_day)
+        payload = _garmin_call(
+            "sleep",
+            lambda: client.get_daily_sleep_summaries(cursor.isoformat(), window_end.isoformat()),
+        )
+        if isinstance(payload, list):
+            result.extend(payload)
+        elif payload is not None:
+            result.append(payload)
+        cursor = window_end + timedelta(days=1)
+    return result
+
+
 def _rows(value: Any, dataset: str, fallback_day: date) -> list[tuple[str, date, str, Any]]:
     items = value if isinstance(value, list) else [value]
     rows = []
@@ -99,7 +117,6 @@ def sync() -> None:
     with GarminPersonalApiClient(token.access_token) as client:
         range_calls = [
             ("daily summaries", "daily_summaries", lambda: client.get_daily_summaries(start, end)),
-            ("sleep", "sleep_summaries", lambda: client.get_daily_sleep_summaries(start, end)),
             ("steps", "steps", lambda: client.get_daily_steps(start, end)),
             ("stress", "stress", lambda: client.get_daily_stress(start, end)),
             ("HRV", "hrv", lambda: client.get_daily_hrv_summaries(start, end)),
@@ -107,6 +124,7 @@ def sync() -> None:
         ]
         for stage, dataset, call in range_calls:
             collected.extend(_rows(_garmin_call(stage, call), dataset, end_day))
+        collected.extend(_rows(_fetch_sleep(client, start_day, end_day), "sleep_summaries", end_day))
 
         page_start, page_size = 0, 100
         while True:
