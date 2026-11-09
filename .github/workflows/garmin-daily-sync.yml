@@ -1,0 +1,48 @@
+name: Garmin to Neon sync
+
+on:
+  schedule:
+    - cron: "37 4 * * *"
+  workflow_dispatch:
+    inputs:
+      lookback_days:
+        description: "Days to import on this manual run (1–90)"
+        required: true
+        default: "90"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SYNC_CONFIGURED: ${{ secrets.GARMIN_PERSONAL_API_KEY != '' && secrets.DATABASE_URL != '' }}
+    steps:
+      - name: Skip until secrets are configured
+        if: env.SYNC_CONFIGURED != 'true'
+        run: echo "Skipped. Add the Garmin and Neon repository secrets to enable synchronization."
+
+      - uses: actions/checkout@v4
+        if: env.SYNC_CONFIGURED == 'true'
+
+      - uses: actions/setup-python@v5
+        if: env.SYNC_CONFIGURED == 'true'
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install sync dependencies
+        if: env.SYNC_CONFIGURED == 'true'
+        run: python -m pip install -r requirements.txt
+
+      - name: Sync Garmin data to Neon
+        if: env.SYNC_CONFIGURED == 'true'
+        env:
+          GARMIN_PERSONAL_API_KEY: ${{ secrets.GARMIN_PERSONAL_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SYNC_LOOKBACK_DAYS: ${{ github.event_name == 'schedule' && '7' || inputs.lookback_days }}
+        run: python sync_garmin.py
